@@ -10,12 +10,14 @@ TCP_PORT = random.randint(20000, 40000)
 
 
 def create_deck():
+    """Create and shuffle a standard 52-card deck represented as (rank, suit) tuples."""
     deck = [(rank, suit) for rank in range(1, 14) for suit in range(4)]
     random.shuffle(deck)
     return deck
 
 
 def send_offers():
+    """Broadcast UDP 'offer' messages so clients can discover this server."""
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
@@ -51,12 +53,13 @@ def recv_exact(conn: socket.socket, n: int):
 
 
 def send_payload(conn: socket.socket, result, rank, suit):
-    # [Server -> Client] payload
+    """Send a single [Server -> Client] payload message with game state."""
     msg = struct.pack("!IbBHB", MAGIC_COOKIE, PAYLOAD, result, rank, suit)
     conn.sendall(msg)
 
 
 def recv_client_decision(conn: socket.socket):
+    """Receive a decision payload from the client and return normalized decision text."""
     data = recv_exact(conn, 10)
     if not data:
         return None
@@ -69,9 +72,11 @@ def recv_client_decision(conn: socket.socket):
 
 
 def handle_client(conn: socket.socket, addr):
+    """Handle a single client session: handshake, then play N rounds of Blackjack."""
     print(f"Client connected: {addr}")
 
     #region client connected
+    # Initial request contains cookie, type, number of rounds, and team name (fixed 32 bytes)
     req = recv_exact(conn, 38)
     if not req:
         conn.close()
@@ -93,19 +98,18 @@ def handle_client(conn: socket.socket, addr):
         print(f"=====ROUND: {round_idx+1}/{rounds} STARTED=====")
         deck = create_deck()
 
-        # player and dealer get two cards (each deck.pop generate one card - number and suit)
+        # Deal 2 cards to player and 2 to dealer (one dealer card is hidden initially)
         player = [deck.pop(), deck.pop()]
         dealer = [deck.pop(), deck.pop()]
 
         player_sum = sum(card_value(c_val) for c_val, suit in player)
 
-        # send to client the initial deal
+        # Send initial deal to client (player cards + dealer up-card)
         for r, s in player:
             send_payload(conn, 0, r, s)
         send_payload(conn, 0, dealer[0][0], dealer[0][1])
 
-        # print('player sum: ', player_sum)
-        # Player turn
+        # Player turn: keep hitting until stand or bust
         while player_sum <= 21:
             decision = recv_client_decision(conn)
             if decision is None:
@@ -119,18 +123,18 @@ def handle_client(conn: socket.socket, addr):
             card = deck.pop()
             player.append(card)
             cv = card_value(card[0])
-            # print('CARD: ', card[0])
             player_sum += cv
             if player_sum <= 21:
                 send_payload(conn, 0, card[0], card[1])
             else:
                 break
 
+        # If player busts, send loss result (2) and move to next round
         if player_sum > 21:
             send_payload(conn, 2, card[0], card[1])  # player loss
             continue
 
-        # Dealer turn
+        # Dealer turn: reveal hidden card then draw until reaching 17+
         dealer_sum = sum(card_value(r) for r, _ in dealer)
         send_payload(conn, 0, dealer[1][0], dealer[1][1])  # reveal hidden
 
@@ -140,7 +144,7 @@ def handle_client(conn: socket.socket, addr):
             dealer_sum += card_value(card[0])
             send_payload(conn, 0, card[0], card[1])
 
-        # Result
+        # Determine round outcome: 3=win, 2=loss, 1=tie
         if dealer_sum > 21 or player_sum > dealer_sum:
             wins += 1
             result = 3
@@ -149,6 +153,7 @@ def handle_client(conn: socket.socket, addr):
         else:
             result = 1
 
+        # Final round result message (rank/suit are unused here)
         send_payload(conn, result, 0, 0)
 
     print(f"CLIENT FINISHED. WIN RATE: {wins}/{rounds}")
@@ -161,6 +166,7 @@ def handle_client(conn: socket.socket, addr):
 
 #region shit
 def tcp_server():
+    """Start the TCP server loop and spawn a thread per connected client."""
     # Create a TCP socket (IPv4)
     tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -189,6 +195,7 @@ def tcp_server():
 
 
 if __name__ == "__main__":
+    # Run UDP offer broadcaster in the background, then start TCP server
     threading.Thread(target=send_offers, daemon=True).start()
     tcp_server()
 #endregion

@@ -20,7 +20,8 @@ def recv_exact(sock: socket.socket, n: int):
 
 
 def send_decision(sock: socket.socket, decision: str):
-    decision = decision.ljust(5)[:5]  # "Hittt" / "Stand"
+    """Send the player's decision ("hittt" / "Stand") as a fixed-size payload."""
+    decision = decision.ljust(5)[:5]  # must be exactly 5 bytes
     msg = struct.pack(
         "!Ib5s",
         MAGIC_COOKIE,
@@ -31,6 +32,7 @@ def send_decision(sock: socket.socket, decision: str):
 
 
 def listen_for_offer():
+    """Listen on UDP for server offers and return (server_ip, tcp_port)."""
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     udp.bind(('', UDP_PORT))
@@ -59,7 +61,7 @@ def play():
 
     print("Client started, listening for offer requests...")
 
-    # get the ip and the port of the host game server
+    # Discover server via UDP broadcast (offer), then connect over TCP
     ip, port = listen_for_offer()
 
     #region Connect to server (request) and send number of rounds
@@ -71,7 +73,7 @@ def play():
         MAGIC_COOKIE,
         REQUEST,
         rounds,
-        TEAM_NAME.encode("ascii", errors="ignore").ljust(32, b'\x00')
+        TEAM_NAME.encode("ascii", errors="ignore").ljust(32, b'\x00')  # fixed 32B team name
     )
     tcp.sendall(req)
     #endregion
@@ -79,12 +81,13 @@ def play():
     #region initialize game
     wins, ties, played = 0, 0, 0
 
-    phase = "init"
+    phase = "init"  # init -> player -> dealer
     init_cards_seen = 0
     player_cards = []
     dealer_cards = []
 
     def reset_round_state():
+        """Reset per-round state while keeping overall statistics."""
         nonlocal phase, init_cards_seen, player_cards, dealer_cards
         phase = "init"
         init_cards_seen = 0
@@ -95,7 +98,7 @@ def play():
     #endregion
 
     print(f'\n===ROUND ({played+1}/{rounds}) STARTED!===')
-    # run the game (all the rounds)
+    # Main loop: receive cards/results from server and respond with decisions
     while True:
         data = recv_exact(tcp, 9)
         if not data:
@@ -106,11 +109,11 @@ def play():
         if cookie != MAGIC_COOKIE or mtype != PAYLOAD:
             continue
 
-
         # round NOT over
         if result == 0:
             if phase == "init":
                 init_cards_seen += 1
+                # First 2 cards are the player's initial hand, rest are dealer's
                 if init_cards_seen <= 2:
                     player_cards.append((rank, suit))
                     total_player = sum(card_value(c[0]) for c in player_cards)
@@ -129,7 +132,7 @@ def play():
                 total_dealer = sum(card_value(c[0]) for c in dealer_cards)
                 print(f"\tYou: {card_text}\t\tPlayer:{total_player}, Dealer:{total_dealer}")
 
-            else: # phase=dealer
+            else:  # phase=dealer
                 dealer_cards.append((rank, suit))
                 total_player = sum(card_value(c[0]) for c in player_cards)
                 total_dealer = sum(card_value(c[0]) for c in dealer_cards)
@@ -143,6 +146,7 @@ def play():
                 elif decision_in in ("hit", "h"):
                     send_decision(tcp, "hittt")
                 else:
+                    # Default behavior on invalid input: Stand
                     print("Invalid input is -> STAND!")
                     send_decision(tcp, "stand")
                     phase = "dealer"
@@ -151,7 +155,6 @@ def play():
 
         # round IS over
         else:
-            # Round ended
             played += 1
             remaining = rounds - played
 
@@ -159,6 +162,7 @@ def play():
                 print(f"YOU WIN!")
                 wins += 1
             elif result == 2:
+                # If the last message includes a player card at end-of-round, print it
                 if phase == 'player':
                     player_cards.append((rank, suit))
                     total_player = sum(card_value(c[0]) for c in player_cards)
