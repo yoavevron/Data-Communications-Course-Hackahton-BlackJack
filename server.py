@@ -95,7 +95,7 @@ def handle_client(conn: socket.socket, addr):
     wins = 0
 
     for round_idx in range(rounds):
-        print(f"=====ROUND: {round_idx+1}/{rounds} STARTED=====")
+        print(f"[{team_str}]:  =====ROUND: {round_idx+1}/{rounds} STARTED=====")
         deck = create_deck()
 
         # Deal 2 cards to player and 2 to dealer (one dealer card is hidden initially)
@@ -116,7 +116,7 @@ def handle_client(conn: socket.socket, addr):
                 conn.close()
                 return
 
-            print('user decision: ', decision)
+            print(f'[{team_str}]:  USER DECISION: ', decision)
             if decision == "stand":
                 break
 
@@ -156,7 +156,7 @@ def handle_client(conn: socket.socket, addr):
         # Final round result message (rank/suit are unused here)
         send_payload(conn, result, 0, 0)
 
-    print(f"CLIENT FINISHED. WIN RATE: {wins}/{rounds}")
+    print(f"[{team_str}]:  CLIENT FINISHED. WIN RATE: {wins}/{rounds}")
     try:
         conn.shutdown(socket.SHUT_RDWR)
     except OSError:
@@ -164,7 +164,6 @@ def handle_client(conn: socket.socket, addr):
     conn.close()
 
 
-#region shit
 def tcp_server():
     """Start the TCP server loop and spawn a thread per connected client."""
     # Create a TCP socket (IPv4)
@@ -198,4 +197,3 @@ if __name__ == "__main__":
     # Run UDP offer broadcaster in the background, then start TCP server
     threading.Thread(target=send_offers, daemon=True).start()
     tcp_server()
-#endregion
