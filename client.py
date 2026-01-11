@@ -2,7 +2,7 @@ import socket
 import struct
 from constants import *
 
-TEAM_NAME = "client 1"
+TEAM_NAME = "black j-ACK"
 
 
 def recv_exact(sock: socket.socket, n: int):
